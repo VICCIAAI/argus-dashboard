@@ -1,7 +1,13 @@
-import { API_BASE_URL, WS_EVENTS_URL } from "./config";
+import { WS_EVENTS_URL } from "./config";
 
 // Shapes match the FastAPI contract in CLAUDE.md — keep in sync with
 // Mohammed's backend once it exists for real.
+//
+// Calls go to /api/argus/* on this origin, not straight to the backend:
+// the JWT is an HttpOnly cookie here, so only a server-side hop can
+// attach it (see app/api/argus/[...path]/route.ts). Paths below are the
+// backend's own, minus the /api prefix the proxy re-adds.
+const PROXY_BASE = "/api/argus";
 
 export interface StatusResponse {
   fps: number;
@@ -44,7 +50,7 @@ export class ApiError extends Error {
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, {
+    res = await fetch(`${PROXY_BASE}${path}`, {
       ...init,
       credentials: "include",
       headers: {
@@ -53,7 +59,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch {
-    throw new ApiError(`Cannot reach backend at ${API_BASE_URL}`, 0);
+    throw new ApiError("Cannot reach the ARGUS node", 0);
   }
 
   if (!res.ok) {
@@ -65,12 +71,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getStatus: () => apiFetch<StatusResponse>("/api/status"),
+  getStatus: () => apiFetch<StatusResponse>("/status"),
 
-  getEvents: () => apiFetch<DetectionEvent[]>("/api/events"),
+  getEvents: () => apiFetch<DetectionEvent[]>("/events"),
 
   labelEvent: (id: number, payload: LabelPayload) =>
-    apiFetch<void>(`/api/events/${id}/label`, {
+    apiFetch<void>(`/events/${id}/label`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -97,4 +103,27 @@ export function connectEventsSocket(
   if (onError) socket.onerror = onError;
 
   return socket;
+}
+
+/**
+ * MJPEG camera stream, for an <img src>. An <img> cannot carry an
+ * Authorization header, which is why this points at the proxy rather
+ * than at the node's /api/camera/stream directly.
+ */
+export function liveStreamUrl(): string {
+  return `${PROXY_BASE}/camera/stream`;
+}
+
+/** Single still, used as the live panel's poster and on failure retries. */
+export function cameraSnapshotUrl(cacheBust?: number): string {
+  const suffix = cacheBust === undefined ? "" : `?t=${cacheBust}`;
+  return `${PROXY_BASE}/camera/snapshot${suffix}`;
+}
+
+/**
+ * The still captured for one event. The node serves it at
+ * /api/events/{id}/snapshot; it 404s for events recorded without one.
+ */
+export function eventSnapshotUrl(id: number): string {
+  return `${PROXY_BASE}/events/${id}/snapshot`;
 }

@@ -83,14 +83,69 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "POST" && /^\/api\/events\/\d+\/label$/.test(req.url)) {
-    send(res, 200, { ok: true });
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      // Persist within the process only, so a Confirm on the alerts page
+      // survives the next poll instead of springing back.
+      const id = Number(req.url.split("/")[3]);
+      const target = events.find((event) => event.id === id);
+      if (target) {
+        let payload = {};
+        try {
+          payload = JSON.parse(body || "{}");
+        } catch {
+          // malformed body — treat as a bare confirm
+        }
+        if (payload.action === "confirm") target.confirmed = 1;
+        if (payload.action === "correct" && payload.label) {
+          target.label = payload.label;
+        }
+      }
+      send(res, 200, { ok: true });
+    });
+    return;
+  }
+
+  // No fake video here. The camera endpoints belong to the node; the
+  // live page renders its "camera unavailable" state against this, which
+  // is the honest thing to show when there is no Pi on the other end.
+  if (req.method === "GET" && /^\/api\/camera\/(stream|snapshot)/.test(req.url)) {
+    send(res, 503, { error: "No camera on the mock backend — run against a node" });
     return;
   }
 
   send(res, 404, { error: "not found" });
 });
 
+// A trickle of new events, so the polling fallback and the alerts badge
+// visibly do something without a node attached.
+const ZONES = ["Front door", "Driveway", "Backyard", "Side gate"];
+let nextId = events.length + 1;
+
+setInterval(() => {
+  const isAlert = Math.random() < 0.3;
+  const cls = isAlert
+    ? "person"
+    : ["person", "vehicle", "package", "animal"][Math.floor(Math.random() * 4)];
+
+  events.unshift({
+    id: nextId++,
+    cls,
+    zone: ZONES[Math.floor(Math.random() * ZONES.length)],
+    node: Math.random() < 0.5 ? "Node A" : "Node B",
+    ts: new Date().toISOString(),
+    status: isAlert ? "stranger" : "na",
+    label: isAlert ? "Unusual for this site (person)" : cls[0].toUpperCase() + cls.slice(1),
+    confidence: 70 + Math.floor(Math.random() * 30),
+    confirmed: 0,
+  });
+
+  events.length = Math.min(events.length, 50);
+}, 20_000).unref?.();
+
 server.listen(PORT, () => {
   console.log(`Mock ARGUS backend listening on http://localhost:${PORT}`);
   console.log("Endpoints: POST /api/login, GET /api/status, GET /api/events, POST /api/events/:id/label");
+  console.log("Camera endpoints answer 503 — the live feed needs a real node.");
 });
