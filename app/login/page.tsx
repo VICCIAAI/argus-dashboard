@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusDot } from "@/components/StatusDot";
+import { NodeSwitcher } from "@/components/NodeSwitcher";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -50,6 +51,18 @@ export default function LoginPage() {
           className="rounded-md border border-border bg-surface p-6"
         >
           <div className="space-y-4">
+            {/* Each node signs its own logins, so pick the node first. The
+                choice used to live only in the nav, which a browser left on
+                an offline node could never reach. */}
+            <div>
+              <span className="block font-mono text-[11px] tracking-wider text-muted uppercase">
+                Node
+              </span>
+              <div className="mt-2">
+                <NodeSwitcher />
+              </div>
+            </div>
+
             <div>
               <label
                 htmlFor="username"
