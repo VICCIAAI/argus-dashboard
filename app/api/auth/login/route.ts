@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { API_BASE_URL, AUTH_COOKIE_NAME, AUTH_COOKIE_SECURE } from "@/lib/config";
+import { AUTH_COOKIE_NAME, AUTH_COOKIE_SECURE } from "@/lib/config";
+import { selectedNode } from "@/lib/selectedNode";
 
 // FLAG (per CLAUDE.md): POST /api/login currently returns
 // { access_token } in the JSON body, not a Set-Cookie header. Until
@@ -9,17 +10,19 @@ import { API_BASE_URL, AUTH_COOKIE_NAME, AUTH_COOKIE_SECURE } from "@/lib/config
 // cookie natively, this proxy can just forward the response.
 export async function POST(request: Request) {
   const credentials = await request.json();
+  // Each node signs its own tokens, so log in to the one being viewed.
+  const node = await selectedNode();
 
   let backendRes: Response;
   try {
-    backendRes = await fetch(`${API_BASE_URL}/api/login`, {
+    backendRes = await fetch(`${node.baseUrl}/api/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(credentials),
     });
   } catch {
     return NextResponse.json(
-      { error: `Cannot reach backend at ${API_BASE_URL}` },
+      { error: `Cannot reach ${node.name} at ${node.baseUrl}` },
       { status: 502 },
     );
   }

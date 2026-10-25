@@ -8,6 +8,7 @@ import {
   type DetectionEvent,
   type LabelPayload,
 } from "@/lib/api";
+import { fetchNodes } from "@/hooks/useNodes";
 
 /**
  * The live event feed, shared by every dashboard page.
@@ -99,6 +100,12 @@ export function useEventFeed() {
       await refresh();
       if (cancelled) return;
 
+      // The socket goes straight to the node, so it needs the picked
+      // node's own address rather than the proxy.
+      const nodes = await fetchNodes();
+      const wsUrl = nodes?.nodes.find((node) => node.id === nodes.selected)?.wsUrl;
+      if (cancelled) return;
+
       try {
         socket = connectEventsSocket(
           (event) => {
@@ -113,6 +120,7 @@ export function useEventFeed() {
           () => {
             if (!cancelled) startPolling();
           },
+          wsUrl,
         );
 
         socket.onopen = () => {

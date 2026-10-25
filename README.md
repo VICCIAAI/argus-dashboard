@@ -93,6 +93,7 @@ mock backend.
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | Where the FastAPI backend (real or mock) lives. |
+| `ARGUS_NODES` | unset | Nodes for the nav's node picker, `Name=URL` comma separated (e.g. `Node A=http://10.0.0.140:8000,Node B=http://10.0.0.128:8000`). Server-side only: the proxy reaches a node by its id in this list, never a URL from the browser. Unset = one node at `NEXT_PUBLIC_API_BASE_URL`. |
 | `NEXT_PUBLIC_WS_EVENTS_URL` | derived from the above | Override if the WS endpoint lives somewhere else. |
 | `AUTH_COOKIE_SECURE` | `false` | Set to `true` only once the device serves HTTPS. See the comment in `lib/config.ts` — this is a deliberate LAN-vs-TLS decision, not a build-mode side effect. |
 

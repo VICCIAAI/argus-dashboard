@@ -16,6 +16,46 @@ export interface StatusResponse {
   nodes_online: number;
 }
 
+/** One thermal reading from the node (GET /api/system/thermal*). */
+export interface ThermalSample {
+  ts: number;
+  soc_temp_c: number | null;
+  cpu_mhz: number | null;
+  fan_rpm: number | null;
+  throttled_hex: string | null;
+  /** Throttle flags set at the time of the sample; empty when healthy. */
+  throttled_now: string[];
+  detect_fps: number | null;
+}
+
+/** pass = stayed under the soft limit with no throttling in the window. */
+export interface ThermalSummary {
+  window_min: number;
+  samples: number;
+  temp_min_c: number | null;
+  temp_max_c: number | null;
+  temp_avg_c: number | null;
+  throttled_samples: number;
+  pass: boolean;
+}
+
+export interface ThermalStatus {
+  node: string;
+  enclosure: string;
+  interval_s: number;
+  running_since: string;
+  limits_c: { soft: number; hard: number };
+  current: ThermalSample | null;
+  throttled: { hex: string | null; now: string[]; since_boot: string[] };
+  summary: ThermalSummary;
+}
+
+export interface ThermalHistory {
+  interval_s: number;
+  summary: ThermalSummary;
+  samples: ThermalSample[];
+}
+
 export type DetectionClass = "person" | "vehicle" | "package" | "animal";
 export type DetectionStatus = "member" | "stranger" | "na";
 
@@ -75,6 +115,11 @@ export const api = {
 
   getEvents: () => apiFetch<DetectionEvent[]>("/events"),
 
+  getThermal: () => apiFetch<ThermalStatus>("/system/thermal"),
+
+  getThermalHistory: (minutes: number) =>
+    apiFetch<ThermalHistory>(`/system/thermal/history?minutes=${minutes}`),
+
   labelEvent: (id: number, payload: LabelPayload) =>
     apiFetch<void>(`/events/${id}/label`, {
       method: "POST",
@@ -89,8 +134,10 @@ export const api = {
 export function connectEventsSocket(
   onEvent: (event: DetectionEvent) => void,
   onError?: (event: Event) => void,
+  /** The selected node's socket (GET /api/nodes); defaults to the env one. */
+  url: string = WS_EVENTS_URL,
 ): WebSocket {
-  const socket = new WebSocket(WS_EVENTS_URL);
+  const socket = new WebSocket(url);
 
   socket.onmessage = (message) => {
     try {
@@ -126,4 +173,9 @@ export function cameraSnapshotUrl(cacheBust?: number): string {
  */
 export function eventSnapshotUrl(id: number): string {
   return `${PROXY_BASE}/events/${id}/snapshot`;
+}
+
+/** The thermal window as a CSV download, for soak-test records. */
+export function thermalCsvUrl(minutes: number): string {
+  return `${PROXY_BASE}/system/thermal.csv?minutes=${minutes}`;
 }

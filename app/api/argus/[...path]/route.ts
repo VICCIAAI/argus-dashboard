@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { API_BASE_URL, AUTH_COOKIE_NAME } from "@/lib/config";
+import { AUTH_COOKIE_NAME } from "@/lib/config";
+import { selectedNode } from "@/lib/selectedNode";
 
 // Server-side proxy to the ARGUS node's API.
 //
@@ -15,10 +16,14 @@ import { API_BASE_URL, AUTH_COOKIE_NAME } from "@/lib/config";
 //
 // `/api/argus/<suffix>` maps to `<backend>/api/<suffix>`, allowlisted
 // below — this is a proxy to specific endpoints, not an open relay to
-// anything on the node.
+// anything on the node. <backend> is the node picked in the nav, looked
+// up by id in ARGUS_NODES (lib/nodes.ts), never a URL from the browser.
 
 const GET_ALLOWED = [
   /^status$/,
+  /^system\/thermal$/,
+  /^system\/thermal\/history$/,
+  /^system\/thermal\.csv$/,
   /^events$/,
   /^events\/\d+\/snapshot$/,
   /^camera\/snapshot$/,
@@ -46,9 +51,9 @@ function forbidden(suffix: string) {
   );
 }
 
-function unreachable() {
+function unreachable(name: string, baseUrl: string) {
   return NextResponse.json(
-    { error: `Cannot reach backend at ${API_BASE_URL}` },
+    { error: `Cannot reach ${name} at ${baseUrl}` },
     { status: 502 },
   );
 }
@@ -83,9 +88,10 @@ export async function GET(
   if (!token) return unauthorized();
 
   const query = request.nextUrl.search;
+  const node = await selectedNode();
 
   try {
-    const upstream = await fetch(`${API_BASE_URL}/api/${suffix}${query}`, {
+    const upstream = await fetch(`${node.baseUrl}/api/${suffix}${query}`, {
       headers: { Authorization: `Bearer ${token}` },
       // The browser closing the <img> should tear the camera stream down
       // rather than leave it running against the node.
@@ -94,7 +100,7 @@ export async function GET(
     });
     return passthrough(upstream);
   } catch {
-    return unreachable();
+    return unreachable(node.name, node.baseUrl);
   }
 }
 
@@ -111,9 +117,10 @@ export async function POST(
   if (!token) return unauthorized();
 
   const body = await request.text();
+  const node = await selectedNode();
 
   try {
-    const upstream = await fetch(`${API_BASE_URL}/api/${suffix}`, {
+    const upstream = await fetch(`${node.baseUrl}/api/${suffix}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -125,6 +132,6 @@ export async function POST(
     });
     return passthrough(upstream);
   } catch {
-    return unreachable();
+    return unreachable(node.name, node.baseUrl);
   }
 }

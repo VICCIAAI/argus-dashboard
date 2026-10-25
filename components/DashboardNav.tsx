@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { NodeSwitcher } from "@/components/NodeSwitcher";
 
 // One header for every console page, so there is always a way back to
 // the console from the live feed and the alerts feed — and to them from
@@ -12,6 +13,7 @@ const LINKS = [
   { href: "/dashboard", label: "Console" },
   { href: "/dashboard/live", label: "Live feed" },
   { href: "/dashboard/alerts", label: "Alerts" },
+  { href: "/dashboard/thermal", label: "Thermal" },
 ] as const;
 
 export function DashboardNav({
@@ -39,6 +41,8 @@ export function DashboardNav({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <NodeSwitcher />
+
         <nav className="flex items-center gap-1 rounded border border-border bg-surface p-1">
           {LINKS.map((link) => {
             // Exact match only: /dashboard must not light up while its
