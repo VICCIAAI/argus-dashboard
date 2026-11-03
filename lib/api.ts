@@ -69,6 +69,10 @@ export interface DetectionEvent {
   label: string;
   confidence: number;
   confirmed: number;
+  /** 1 = anomaly, frozen on the node once decided; null = unranked. */
+  priority?: number | null;
+  /** Node path of the kept clip; set only for events with footage. */
+  clip?: string | null;
 }
 
 export type LabelAction = "confirm" | "correct";
@@ -173,6 +177,11 @@ export function cameraSnapshotUrl(cacheBust?: number): string {
  */
 export function eventSnapshotUrl(id: number): string {
   return `${PROXY_BASE}/events/${id}/snapshot`;
+}
+
+/** The H.264 clip the node kept for a priority-1 event. */
+export function eventClipUrl(id: number): string {
+  return `${PROXY_BASE}/events/${id}/clip`;
 }
 
 /** The thermal window as a CSV download, for soak-test records. */

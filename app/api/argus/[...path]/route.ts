@@ -26,6 +26,7 @@ const GET_ALLOWED = [
   /^system\/thermal\.csv$/,
   /^events$/,
   /^events\/\d+\/snapshot$/,
+  /^events\/\d+\/clip$/,
   /^camera\/snapshot$/,
   /^camera\/stream$/,
 ];
@@ -61,7 +62,16 @@ function unreachable(name: string, baseUrl: string) {
 /** Pass the upstream response straight through, body included. */
 function passthrough(upstream: Response): NextResponse {
   const headers = new Headers();
-  for (const name of ["content-type", "cache-control", "content-disposition"]) {
+  // The range headers are what let <video> seek a clip instead of
+  // downloading it from the start every time.
+  for (const name of [
+    "content-type",
+    "cache-control",
+    "content-disposition",
+    "content-length",
+    "content-range",
+    "accept-ranges",
+  ]) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -91,8 +101,12 @@ export async function GET(
   const node = await selectedNode();
 
   try {
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    const range = request.headers.get("range");
+    if (range) headers.Range = range;
+
     const upstream = await fetch(`${node.baseUrl}/api/${suffix}${query}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
       // The browser closing the <img> should tear the camera stream down
       // rather than leave it running against the node.
       signal: request.signal,

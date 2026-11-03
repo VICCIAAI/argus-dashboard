@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { useEventFeed } from "@/hooks/useEventFeed";
-import { eventSnapshotUrl, type DetectionEvent } from "@/lib/api";
+import { eventClipUrl, eventSnapshotUrl, type DetectionEvent } from "@/lib/api";
 import { DashboardNav } from "@/components/DashboardNav";
 import { FeedModeBadge } from "@/components/FeedModeBadge";
 import { EventList } from "@/components/EventList";
@@ -131,14 +131,39 @@ export default function AlertsPage() {
   );
 }
 
-/** The still the node kept for this event, if it kept one. */
+/**
+ * The clip the node kept for this event, or its still when there is no
+ * clip. Only priority-1 events get footage; the still is the poster.
+ */
 function AlertSnapshot({ event }: { event: DetectionEvent }) {
   const [failed, setFailed] = useState(false);
+  const [clipFailed, setClipFailed] = useState(false);
 
   // Keyed by the caller on nothing — reset when the event changes.
   useEffect(() => {
     setFailed(false);
+    setClipFailed(false);
   }, [event.id]);
+
+  if (event.clip && !clipFailed) {
+    return (
+      <div className="overflow-hidden rounded border border-border bg-black">
+        <video
+          key={event.id}
+          src={eventClipUrl(event.id)}
+          poster={eventSnapshotUrl(event.id)}
+          controls
+          playsInline
+          preload="metadata"
+          className="aspect-video w-full object-contain"
+          onError={() => setClipFailed(true)}
+        />
+        <p className="border-t border-border px-4 py-2 font-mono text-[11px] tracking-widest text-danger uppercase">
+          Priority 1 · clip
+        </p>
+      </div>
+    );
+  }
 
   if (failed) return null;
 

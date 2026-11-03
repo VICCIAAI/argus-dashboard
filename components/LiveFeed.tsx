@@ -23,7 +23,7 @@ export function LiveFeed() {
   }
 
   return (
-    <div className="flex h-full flex-col rounded border border-border bg-surface">
+    <div className="flex flex-col rounded border border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <p className="font-mono text-[11px] tracking-widest text-muted uppercase">
           Live camera
@@ -37,7 +37,7 @@ export function LiveFeed() {
         </span>
       </div>
 
-      <div className="relative flex-1 bg-black">
+      <div className="relative bg-black">
         <div className="aspect-video w-full">
           {state !== "error" && (
             <img

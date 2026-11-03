@@ -63,7 +63,7 @@ export default function LivePage() {
       <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
         <div className="flex min-h-[420px] flex-col gap-6">
           <LiveFeed />
-          <div className="min-h-[220px]">
+          <div className="min-h-[220px] flex-1">
             <EventList
               events={recent}
               selectedId={selectedId}
