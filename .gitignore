@@ -51,3 +51,6 @@ CLAUDE.md
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# federated run history and operator notes (local evidence, see README)
+/data/

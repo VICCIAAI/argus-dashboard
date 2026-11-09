@@ -8,6 +8,13 @@ import { isSessionCookie, sessionCookieName } from "@/lib/nodeSessions";
 // the picked node, so they need a session on that one.
 const PROTECTED_PREFIXES = ["/dashboard"];
 
+// These pages cover several nodes and ask for each node's sign-in themselves.
+const MULTI_NODE_PAGES = new Set([
+  "/dashboard",
+  "/dashboard/label",
+  "/dashboard/federated",
+]);
+
 export function proxy(request: NextRequest) {
   const isProtected = PROTECTED_PREFIXES.some((prefix) =>
     request.nextUrl.pathname.startsWith(prefix),
@@ -16,7 +23,7 @@ export function proxy(request: NextRequest) {
   if (!isProtected) return NextResponse.next();
 
   const hasSession =
-    request.nextUrl.pathname === "/dashboard"
+    MULTI_NODE_PAGES.has(request.nextUrl.pathname)
       ? request.cookies.getAll().some((cookie) => isSessionCookie(cookie.name))
       : request.cookies.has(
           sessionCookieName(

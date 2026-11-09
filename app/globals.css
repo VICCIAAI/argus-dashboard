@@ -10,6 +10,15 @@
   --accent: #2dd4bf;
   --accent-dim: #164e47;
   --danger: #f0555a;
+
+  /* Chart series, validated for colorblind separation on --surface. Node
+     identity uses 1-3; class balance uses all four beside --danger. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --chart-grid: #232b32;
+  --chart-axis: #39434c;
 }
 
 @theme inline {

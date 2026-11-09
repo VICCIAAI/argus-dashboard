@@ -33,8 +33,12 @@ const GET_ALLOWED = [
   /^events\/\d+\/clip$/,
   /^camera\/snapshot$/,
   /^camera\/stream$/,
+  /^federated\/samples$/,
 ];
 
+// Deliberately only labels. Starting a round, bootstrapping synthetic rows
+// and rolling back a model are operator decisions made outside the console,
+// so /federated/round and /federated/samples/bootstrap must never be added.
 const POST_ALLOWED = [/^events\/\d+\/label$/];
 
 // The MJPEG stream is an open-ended response; nothing here may be cached

@@ -65,6 +65,23 @@ Next.js 16 (App Router, Turbopack) · React 19 · TypeScript · Tailwind CSS v4
   status, events, labels, event stills, camera stream/snapshot — and
   it's what makes an `<img>` able to show an authenticated MJPEG stream
   at all.
+- **Label events** (`/dashboard/label`) — per-node queue of unlabelled real
+  events with their stills. Routine or Anomaly in one tap or key (R, A, 1 to
+  4 for the class, S skip, X no object, U undo), plus a bulk view that only
+  arms once every picture has rendered. A label waits 6 s on the console
+  before it goes to the node, because the node cannot clear one. Labels
+  are sent as `correct` with an exact label name, and the node's reply is
+  checked. A separate **test set** stays on the console, is never sent to
+  the node, and is frozen to measure each model.
+- **Federated** (`/dashboard/federated`) — pre-flight read of real state,
+  whether things are improving on the frozen test set, per-node gate
+  charts, run history. Starts nothing: the proxy allowlist contains no
+  round or bootstrap route.
+- **Federated history on disk** — `data/federated/history.json` and
+  `operator-notes.jsonl` (gitignored; `ARGUS_FL_DATA_DIR` moves them).
+  The aggregator and the nodes do not keep this, so leave the Federated
+  page open during a round. Flower's REST address is
+  `ARGUS_FLOWER_API`, default `http://localhost:8090`.
 - **Design system** — dark, deliberately non-adaptive theme (see
   `app/globals.css`): near-black background, monospace for
   timestamps/data, a single teal accent reserved for "live" status,

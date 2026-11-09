@@ -1,4 +1,5 @@
 import { WS_EVENTS_URL } from "./config";
+import type { LabelName, SamplesResponse } from "./fl/types";
 
 // Shapes match the FastAPI contract in CLAUDE.md — keep in sync with
 // Mohammed's backend once it exists for real.
@@ -155,6 +156,43 @@ export function createApi(nodeId?: string) {
 
 export const api = createApi();
 
+export interface LabelResult {
+  ok: boolean;
+  id: number;
+  label?: string;
+  labelled_total?: number;
+}
+
+/**
+ * Read a node's samples. A full store can run to megabytes off a busy Pi,
+ * so this allows far longer than the 4 s a status poll gets.
+ */
+export function fetchSamples(nodeId: string, limit: number) {
+  return apiFetch<SamplesResponse>(
+    withNode(`/federated/samples?limit=${limit}`, nodeId),
+    { signal: AbortSignal.timeout(30_000) },
+  );
+}
+
+/**
+ * Write one training label. Always `correct` with an exact label name:
+ * `confirm` lets the node decide what was confirmed from the model's own
+ * call, which would feed the model's opinion back in as ground truth.
+ */
+export function writeLabel(
+  nodeId: string,
+  id: number,
+  label: LabelName,
+  keepalive = false,
+) {
+  const payload: LabelPayload = { action: "correct", label };
+  return apiFetch<LabelResult>(withNode(`/events/${id}/label`, nodeId), {
+    method: "POST",
+    body: JSON.stringify(payload),
+    keepalive,
+  });
+}
+
 /**
  * Opens the live event feed. Backend push shape is identical to a
  * DetectionEvent record (see CLAUDE.md).
@@ -207,8 +245,8 @@ export function cameraSnapshotUrl(cacheBust?: number): string {
  * The still captured for one event. The node serves it at
  * /api/events/{id}/snapshot; it 404s for events recorded without one.
  */
-export function eventSnapshotUrl(id: number): string {
-  return `${PROXY_BASE}/events/${id}/snapshot`;
+export function eventSnapshotUrl(id: number, nodeId?: string): string {
+  return withNode(`${PROXY_BASE}/events/${id}/snapshot`, nodeId);
 }
 
 /** The H.264 clip the node kept for a priority-1 event. */
