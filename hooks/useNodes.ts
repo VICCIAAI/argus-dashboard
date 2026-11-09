@@ -21,11 +21,14 @@ export async function fetchNodes(): Promise<NodesResponse | null> {
 export function useNodes() {
   const [data, setData] = useState<NodesResponse | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void fetchNodes().then((result) => {
-      if (!cancelled) setData(result);
+      if (cancelled) return;
+      setData(result);
+      setLoaded(true);
     });
     return () => {
       cancelled = true;
@@ -54,6 +57,7 @@ export function useNodes() {
   return {
     nodes: data?.nodes ?? [],
     selected: data?.selected ?? null,
+    loaded,
     switching,
     select,
   };

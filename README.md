@@ -22,16 +22,22 @@ Next.js 16 (App Router, Turbopack) · React 19 · TypeScript · Tailwind CSS v4
   **HttpOnly cookie** (never touches client-side JS or `localStorage`).
   A route guard (`proxy.ts`) reads the cookie server-side to gate
   `/dashboard`.
-- **Dashboard** (`/dashboard`) — the console, and the landing page after
-  login —
-  - **Status strip**: FPS, accelerator, model version, nodes online.
-    Three visual states — connecting / online / offline — the offline
-    look also covers a real fetch failure, not just the test toggle.
-  - **Event list**: pulled from `GET /api/events`, flags `stranger`
-    detections with a red indicator.
-  - **Detail panel**: click an event to see its full record, with
-    **Confirm** / **Correct** actions wired to
-    `POST /api/events/{id}/label`.
+- **Side-by-side console** (`/dashboard`) — every node in `ARGUS_NODES`
+  on one screen, and the landing page after login. Each panel fetches
+  and fails on its own and shows:
+  - the node's MJPEG camera stream;
+  - **status**: FPS, accelerator, model version and SoC temperature,
+    with connecting / online / offline / sign-in-needed states;
+  - **recent events**, flagging `stranger` detections in red. Clicking
+    one opens the shared detail panel as an overlay, with **Confirm** /
+    **Correct** wired to `POST /api/events/{id}/label` on that node, and
+    "Back to live view" (or Esc) closes it while the streams keep running.
+- **Per-node sessions** — each node issues its own tokens, so the
+  browser holds one HttpOnly cookie per node (`argus_session_<node id>`).
+  The login page signs in to the picked node; a panel without a session
+  shows its own sign-in form for that node. A password is only sent to
+  the node named on the form and is never stored. The single-node pages
+  need a session on the picked node.
 - **Live feed** (`/dashboard/live`) — the node's MJPEG camera stream
   (`GET /api/camera/stream`) beside the last few detections, so you can
   watch a detection happen and label it in the same view. The camera
@@ -52,8 +58,10 @@ Next.js 16 (App Router, Turbopack) · React 19 · TypeScript · Tailwind CSS v4
   is an HttpOnly cookie on the *dashboard's* origin, so a client-side
   fetch to the node can't carry it, and every real route sits behind
   `require_auth`. Browser calls go to `/api/argus/<suffix>` on this
-  origin; the route reads the cookie server-side and adds
-  `Authorization: Bearer` on the way out. Allowlisted paths only —
+  origin; the route reads that node's cookie server-side and adds
+  `Authorization: Bearer` on the way out. `?node=<id>` picks the node
+  (an id from `ARGUS_NODES`, never a URL); without it, the node picked
+  in the nav is used. Allowlisted paths only —
   status, events, labels, event stills, camera stream/snapshot — and
   it's what makes an `<img>` able to show an authenticated MJPEG stream
   at all.
@@ -143,13 +151,15 @@ Event record:
 ```
 app/
   login/            login page
-  dashboard/        the console (home)
+  dashboard/        side-by-side console (home)
   dashboard/live/   camera stream + recent detections
   dashboard/alerts/ flagged events only, with stills
   api/auth/         login/logout/session route handlers (cookie logic lives here)
   api/argus/        server-side proxy to the node, adds the bearer token
   page.tsx          "/" — pure auth-state redirect, not a real page
 components/
+  NodePanel.tsx     one node on the side-by-side console
+  NodeSignIn.tsx    a panel's sign-in form for its node
   StatusStrip.tsx, EventList.tsx, EventDetailPanel.tsx, StatusDot.tsx
   DashboardNav.tsx  shared header/nav, carries the alert count
   LiveFeed.tsx      MJPEG panel + its own failure states
@@ -157,6 +167,7 @@ components/
   dev/TestOfflineToggle.tsx   ← see "Known gaps" below
 hooks/
   useEventFeed.ts   WS feed with a polling fallback, shared by all pages
+  useNodeHealth.ts  one panel's status and temperature polling
 lib/
   api.ts            typed client for the backend contract above
   AuthContext.tsx   global auth state (session status only, never the JWT)
@@ -179,7 +190,8 @@ scripts/
   seen; nothing pushes to the operator when the page is closed.
 - **`components/dev/TestOfflineToggle.tsx` is a QA aid, not a
   feature.** It fakes the offline status-strip look without touching
-  the real connection, for visual testing. Every place it's wired in
+  the real connection, for visual testing. Nothing wires it in since
+  `/dashboard` became the side-by-side view; any place it's wired in
   is marked `// TEST ONLY — remove before final build` — grep for that
   string before shipping.
 - **HTTPS is an open decision, not solved.** `AUTH_COOKIE_SECURE`

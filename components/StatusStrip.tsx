@@ -89,13 +89,23 @@ export function StatusStrip({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+export function Metric({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
   return (
     <div className="min-w-0">
       <p className="font-mono text-[10px] tracking-wider text-muted uppercase">
         {label}
       </p>
-      <p className="truncate font-mono text-sm text-foreground">{value}</p>
+      <p className="truncate font-mono text-sm text-foreground" style={{ color }}>
+        {value}
+      </p>
     </div>
   );
 }

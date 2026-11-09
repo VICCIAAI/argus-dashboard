@@ -11,7 +11,15 @@ import { StatusDot } from "./StatusDot";
 
 type StreamState = "loading" | "streaming" | "error";
 
-export function LiveFeed() {
+export function LiveFeed({
+  nodeId,
+  compact = false,
+}: {
+  /** Which node to show; defaults to the one picked in the nav. */
+  nodeId?: string;
+  /** Inside a panel: shorter picture, lighter stream, no footer. */
+  compact?: boolean;
+} = {}) {
   const [state, setState] = useState<StreamState>("loading");
   // Bumping this remounts the <img>, which is the only reliable way to
   // reopen an MJPEG connection the browser has already given up on.
@@ -23,8 +31,18 @@ export function LiveFeed() {
   }
 
   return (
-    <div className="flex flex-col rounded border border-border bg-surface">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+    <div
+      className={
+        compact
+          ? "flex flex-col"
+          : "flex flex-col rounded border border-border bg-surface"
+      }
+    >
+      <div
+        className={`flex items-center justify-between border-b border-border px-4 ${
+          compact ? "py-2" : "py-3"
+        }`}
+      >
         <p className="font-mono text-[11px] tracking-widest text-muted uppercase">
           Live camera
         </p>
@@ -38,11 +56,15 @@ export function LiveFeed() {
       </div>
 
       <div className="relative bg-black">
-        <div className="aspect-video w-full">
+        <div className={`aspect-video w-full ${compact ? "max-h-[42vh]" : ""}`}>
           {state !== "error" && (
             <img
               key={attempt}
-              src={`${liveStreamUrl()}?r=${attempt}`}
+              // Several streams share one phone hotspot in a panel view.
+              src={liveStreamUrl(nodeId, {
+                ...(compact ? { quality: 70 } : {}),
+                r: attempt,
+              })}
               alt="Live camera feed from the ARGUS node"
               className="h-full w-full object-contain"
               onLoad={() => setState("streaming")}
@@ -79,11 +101,13 @@ export function LiveFeed() {
         )}
       </div>
 
-      <p className="border-t border-border px-4 py-3 font-mono text-[11px] leading-relaxed text-muted">
-        Frames are served by the node on the local network and proxied with
-        your session token. Nothing is recorded or forwarded off the
-        property by this page.
-      </p>
+      {!compact && (
+        <p className="border-t border-border px-4 py-3 font-mono text-[11px] leading-relaxed text-muted">
+          Frames are served by the node on the local network and proxied with
+          your session token. Nothing is recorded or forwarded off the
+          property by this page.
+        </p>
+      )}
     </div>
   );
 }

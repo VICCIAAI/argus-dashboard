@@ -13,3 +13,14 @@ export function formatTimestamp(ts: string): string {
 export function formatTimeShort(ts: string): string {
   return new Date(ts).toLocaleTimeString(undefined, { hour12: false });
 }
+
+const WARN_C = 70;
+export const AMBER = "#e3b341";
+
+/** SoC temperature colour: over the node's soft limit is the alarm case. */
+export function tempColor(temp: number | null | undefined, soft: number): string {
+  if (temp == null) return "var(--muted)";
+  if (temp >= soft) return "var(--danger)";
+  if (temp >= WARN_C) return AMBER;
+  return "var(--accent)";
+}

@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { AUTH_COOKIE_NAME } from "@/lib/config";
+import type { NodeConfig } from "@/lib/nodes";
+import { findNode, sessionCookieName } from "@/lib/nodeSessions";
 import { selectedNode } from "@/lib/selectedNode";
 
-// Server-side proxy to the ARGUS node's API.
+// Server-side proxy to the ARGUS nodes' API.
 //
 // The JWT lives in an HttpOnly cookie on *this* origin, so client-side
 // fetches to the backend origin never carry it — against the real node
@@ -16,8 +17,11 @@ import { selectedNode } from "@/lib/selectedNode";
 //
 // `/api/argus/<suffix>` maps to `<backend>/api/<suffix>`, allowlisted
 // below — this is a proxy to specific endpoints, not an open relay to
-// anything on the node. <backend> is the node picked in the nav, looked
+// anything on the node. <backend> is the node named by `?node=<id>`, or
+// the one picked in the nav when there is none. Either way it is looked
 // up by id in ARGUS_NODES (lib/nodes.ts), never a URL from the browser.
+// Each node's token stays in that node's own cookie and is only ever sent
+// to that node.
 
 const GET_ALLOWED = [
   /^status$/,
@@ -37,8 +41,26 @@ const POST_ALLOWED = [/^events\/\d+\/label$/];
 // or buffered into a static payload.
 export const dynamic = "force-dynamic";
 
-async function bearer(): Promise<string | null> {
-  return (await cookies()).get(AUTH_COOKIE_NAME)?.value ?? null;
+async function bearer(node: NodeConfig): Promise<string | null> {
+  return (await cookies()).get(sessionCookieName(node.id))?.value ?? null;
+}
+
+/** The node this request is for; null when it names an unknown id. */
+async function targetNode(request: NextRequest): Promise<NodeConfig | null> {
+  const id = request.nextUrl.searchParams.get("node");
+  return id === null ? selectedNode() : findNode(id);
+}
+
+function unknownNode() {
+  return NextResponse.json({ error: "Unknown node" }, { status: 404 });
+}
+
+/** The caller's query string, minus the one parameter that is ours. */
+function upstreamQuery(request: NextRequest): string {
+  const params = new URLSearchParams(request.nextUrl.searchParams);
+  params.delete("node");
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 function unauthorized() {
@@ -94,11 +116,13 @@ export async function GET(
     return forbidden(suffix);
   }
 
-  const token = await bearer();
+  const node = await targetNode(request);
+  if (!node) return unknownNode();
+
+  const token = await bearer(node);
   if (!token) return unauthorized();
 
-  const query = request.nextUrl.search;
-  const node = await selectedNode();
+  const query = upstreamQuery(request);
 
   try {
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
@@ -127,11 +151,13 @@ export async function POST(
     return forbidden(suffix);
   }
 
-  const token = await bearer();
+  const node = await targetNode(request);
+  if (!node) return unknownNode();
+
+  const token = await bearer(node);
   if (!token) return unauthorized();
 
   const body = await request.text();
-  const node = await selectedNode();
 
   try {
     const upstream = await fetch(`${node.baseUrl}/api/${suffix}`, {

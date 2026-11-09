@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "@/lib/config";
 
-// The ARGUS cameras this dashboard can show, one at a time.
+// The ARGUS cameras this dashboard can show.
 //
 // ARGUS_NODES is read server-side only, so the proxy can only ever reach
 // a node listed here -- the node picked in the browser is an id into this

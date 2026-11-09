@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   ApiError,
   connectEventsSocket,
+  createApi,
   type DetectionEvent,
   type LabelPayload,
 } from "@/lib/api";
 import { fetchNodes } from "@/hooks/useNodes";
+import type { NodeOption } from "@/lib/nodes";
 
 /**
  * The live event feed, shared by every dashboard page.
@@ -52,7 +54,11 @@ function mergeEvent(
   return newestFirst([incoming, ...events]).slice(0, MAX_EVENTS);
 }
 
-export function useEventFeed() {
+/** With no node, follows the one picked in the nav. */
+export function useEventFeed(node?: NodeOption) {
+  const nodeId = node?.id;
+  const nodeWsUrl = node?.wsUrl;
+  const client = useMemo(() => (nodeId ? createApi(nodeId) : api), [nodeId]);
   const [events, setEvents] = useState<DetectionEvent[]>([]);
   const [mode, setMode] = useState<FeedMode>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +66,7 @@ export function useEventFeed() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await api.getEvents();
+      const data = await client.getEvents();
       setEvents(newestFirst(data).slice(0, MAX_EVENTS));
       setError(null);
       // A successful poll while the socket is down is "polling", not
@@ -75,7 +81,7 @@ export function useEventFeed() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,8 +108,11 @@ export function useEventFeed() {
 
       // The socket goes straight to the node, so it needs the picked
       // node's own address rather than the proxy.
-      const nodes = await fetchNodes();
-      const wsUrl = nodes?.nodes.find((node) => node.id === nodes.selected)?.wsUrl;
+      let wsUrl = nodeWsUrl;
+      if (!wsUrl) {
+        const nodes = await fetchNodes();
+        wsUrl = nodes?.nodes.find((option) => option.id === nodes.selected)?.wsUrl;
+      }
       if (cancelled) return;
 
       try {
@@ -151,7 +160,7 @@ export function useEventFeed() {
         socket.close();
       }
     };
-  }, [refresh]);
+  }, [refresh, nodeWsUrl]);
 
   /**
    * Confirm/Correct. The node writes the label into the store the next
@@ -159,7 +168,7 @@ export function useEventFeed() {
    * cosmetic toggle — the local update mirrors what the node stored.
    */
   const applyLabel = useCallback(async (id: number, payload: LabelPayload) => {
-    await api.labelEvent(id, payload);
+    await client.labelEvent(id, payload);
     setEvents((prev) =>
       prev.map((event) =>
         event.id === id
@@ -174,7 +183,7 @@ export function useEventFeed() {
           : event,
       ),
     );
-  }, []);
+  }, [client]);
 
   return { events, mode, error, loading, refresh, applyLabel };
 }

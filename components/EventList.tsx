@@ -5,13 +5,22 @@ export function EventList({
   events,
   selectedId,
   onSelect,
+  bare = false,
 }: {
   events: DetectionEvent[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  /** Inside a panel that already draws the border. */
+  bare?: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col rounded border border-border bg-surface">
+    <div
+      className={
+        bare
+          ? "flex h-full flex-col"
+          : "flex h-full flex-col rounded border border-border bg-surface"
+      }
+    >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <p className="font-mono text-[11px] tracking-widest text-muted uppercase">
           Recent events

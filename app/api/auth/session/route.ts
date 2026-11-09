@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { AUTH_COOKIE_NAME } from "@/lib/config";
+import { isSessionCookie } from "@/lib/nodeSessions";
 
-// Reads the HttpOnly cookie server-side and reports auth state — the
-// client never touches the raw JWT. This only decodes the payload to
-// check expiry; it does not verify the signature (that needs the
-// backend's signing secret, which the frontend doesn't have).
+// Reads the HttpOnly cookies server-side and reports auth state — the
+// client never touches a raw token. Real nodes issue opaque tokens with
+// no readable expiry, so those count until the cookie lapses and the node
+// itself says otherwise (the proxy passes its 401 back). A JWT, as the
+// mock backend issues, is only decoded to check expiry; verifying its
+// signature needs the backend's secret, which the frontend doesn't have.
 function isExpired(token: string): boolean {
+  if (token.split(".").length !== 3) return false;
   try {
     const payload = JSON.parse(
       Buffer.from(token.split(".")[1], "base64").toString("utf8"),
@@ -19,11 +22,9 @@ function isExpired(token: string): boolean {
 }
 
 export async function GET() {
-  const token = (await cookies()).get(AUTH_COOKIE_NAME)?.value;
+  const authenticated = (await cookies())
+    .getAll()
+    .some((cookie) => isSessionCookie(cookie.name) && !isExpired(cookie.value));
 
-  if (!token || isExpired(token)) {
-    return NextResponse.json({ authenticated: false });
-  }
-
-  return NextResponse.json({ authenticated: true });
+  return NextResponse.json({ authenticated });
 }

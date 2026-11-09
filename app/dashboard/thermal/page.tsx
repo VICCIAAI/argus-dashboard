@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardNav } from "@/components/DashboardNav";
+import { AMBER, tempColor } from "@/lib/format";
 import {
   api,
   ApiError,
@@ -27,16 +28,6 @@ const WINDOWS = [
 ] as const;
 
 const REFRESH_MS = 15_000;
-const WARN_C = 70;
-const AMBER = "#e3b341";
-
-function tempColor(temp: number | null | undefined, soft: number): string {
-  if (temp == null) return "var(--muted)";
-  if (temp >= soft) return "var(--danger)";
-  if (temp >= WARN_C) return AMBER;
-  return "var(--accent)";
-}
-
 function fmt(value: number | null | undefined, unit: string, digits = 1): string {
   return value == null ? "–" : `${value.toFixed(digits)}${unit}`;
 }
