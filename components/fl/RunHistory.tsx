@@ -146,6 +146,20 @@ function RunDetail({
             </p>
             <dl className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] sm:grid-cols-2 lg:grid-cols-3">
               <Fact name="Train / validation samples" value={`${node.trainSamples ?? "?"} / ${node.valSamples ?? "?"}`} />
+              <Fact
+                name="Trained on"
+                value={
+                  node.humanOnly === true
+                    ? "Human-reviewed labels only"
+                    : node.humanOnly === false
+                      ? "All labels, machine included: a pipeline test, not evidence"
+                      : "Not recorded (before provenance existed): not evidence"
+                }
+              />
+              <Fact
+                name="Labels on node, reviewed / machine"
+                value={`${node.labelsReviewed ?? "?"} / ${node.labelsMachine ?? "?"}`}
+              />
               <Fact name="Exit code" value={node.exitCode ?? "none"} />
               <Fact name="Gate decision" value={gateText(node)} />
               <Fact name="Gate reason" value={result?.reason ?? "none"} />

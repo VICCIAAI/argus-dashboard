@@ -63,7 +63,7 @@ interface RowSummary {
 // stays the same.
 const rowCache = new Map<
   string,
-  { at: number; labelled: number; rows: RowSummary }
+  { at: number; labelled: number; reviewed: number; rows: RowSummary }
 >();
 const ROW_CACHE_MS = 5 * 60_000;
 
@@ -76,6 +76,8 @@ async function readRows(
   if (
     cached &&
     cached.labelled === stats.labelled &&
+    // Reviewing a machine label changes neither count of labels.
+    cached.reviewed === (stats.provenance?.reviewed ?? 0) &&
     Date.now() - cached.at < ROW_CACHE_MS
   ) {
     return cached.rows;
@@ -90,7 +92,12 @@ async function readRows(
     real: res.data.samples.filter((row) => !row.meta?.synthetic),
     synthetic: res.data.samples.filter((row) => row.meta?.synthetic).length,
   };
-  rowCache.set(node.id, { at: Date.now(), labelled: stats.labelled, rows });
+  rowCache.set(node.id, {
+    at: Date.now(),
+    labelled: stats.labelled,
+    reviewed: stats.provenance?.reviewed ?? 0,
+    rows,
+  });
   return rows;
 }
 
@@ -136,6 +143,10 @@ async function readNode(
     needsSignIn: false,
     realLabelled: null,
     realAnomalies: null,
+    labelsReviewed: null,
+    labelsMachine: null,
+    reviewedAnomalies: null,
+    provenanceReported: null,
     syntheticRows: null,
     flwrHandChecked: FLWR_BY_NODE[node.name]
       ? `${FLWR_BY_NODE[node.name]} (hand-checked ${FLWR_CHECKED_ON})`
@@ -166,6 +177,8 @@ async function readNode(
   ]);
 
   const labelled = rows?.real.filter((row) => row.label !== null) ?? null;
+  // No provenance on a row means machine: today's labels were rule-derived.
+  const reviewed = labelled?.filter((row) => row.provenance?.reviewed === true) ?? null;
   return {
     ...base,
     online: true,
@@ -179,6 +192,12 @@ async function readNode(
     realAnomalies: labelled
       ? labelled.filter((row) => row.label === "anomaly").length
       : null,
+    labelsReviewed: reviewed ? reviewed.length : null,
+    labelsMachine: labelled && reviewed ? labelled.length - reviewed.length : null,
+    reviewedAnomalies: reviewed
+      ? reviewed.filter((row) => row.label === "anomaly").length
+      : null,
+    provenanceReported: stats ? stats.provenance !== undefined : null,
     syntheticRows: rows ? rows.synthetic : null,
     roundRunning: round.data?.running,
     scheduler: scheduler.data
@@ -254,6 +273,18 @@ function evaluate(
       add(
         "blocker",
         `${node.name}: ${node.realLabelled} of ${MIN_LABELS_PER_NODE} real labels.`,
+      );
+    }
+    if (node.provenanceReported === false) {
+      add(
+        "warning",
+        `${node.name}: runs code that predates label provenance, so all of its labels count as machine.`,
+      );
+    }
+    if (node.labelsReviewed !== null && node.labelsReviewed < MIN_LABELS_PER_NODE) {
+      add(
+        "warning",
+        `${node.name}: ${node.labelsReviewed} of ${MIN_LABELS_PER_NODE} human-reviewed labels. A round on machine labels is a pipeline test, not evidence.`,
       );
     }
     if (node.syntheticRows) {

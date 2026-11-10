@@ -40,13 +40,71 @@ export interface SampleMeta {
   stationary?: boolean;
 }
 
+/** Who decided a label. Missing on nodes that predate provenance. */
+export interface LabelProvenance {
+  origin: "human" | "machine";
+  source: string;
+  reviewed: boolean;
+  review?: "blind" | "correct" | "accept";
+  suggested_label?: LabelName;
+  suggested_source?: string;
+  via?: string;
+  at?: number;
+}
+
 export interface Sample {
   id: string;
   n: number | null;
   t: number;
   label: LabelName | null;
+  provenance?: LabelProvenance | null;
   features: SampleFeatures;
   meta: SampleMeta;
+}
+
+export interface ProvenanceCounts {
+  reviewed: number;
+  reviewed_blind: number;
+  reviewed_corrected: number;
+  reviewed_accepted: number;
+  reviewed_anomalies: number;
+  machine_unreviewed: number;
+}
+
+/** The machine's guess for an event. Kept apart from labels on the node. */
+export interface Suggestion {
+  n: number;
+  id: string;
+  label: LabelName;
+  source: string;
+  confidence: number | null;
+  uncertainty: number | null;
+  rule_label: LabelName;
+  model_label: LabelName | null;
+  disagree: boolean;
+  at: number;
+}
+
+export interface SuggestionsResponse {
+  count: number;
+  generated_at: number | null;
+  suggestions: Suggestion[];
+}
+
+export interface GenerateResult {
+  generated: number;
+  suggested_anomalies: number;
+  excluded: number;
+  model: string | null;
+  generated_at: number;
+}
+
+/** What the operator did on an event, sent with the label. */
+export interface ReviewPayload {
+  kind: "blind" | "correct" | "accept";
+  suggested_label?: LabelName;
+  suggested_source?: string;
+  via?: string;
 }
 
 export interface SampleStats {
@@ -54,6 +112,7 @@ export interface SampleStats {
   labelled: number;
   unlabelled: number;
   per_label: Record<LabelName, number>;
+  provenance?: ProvenanceCounts;
   path?: string;
 }
 
@@ -136,6 +195,10 @@ export interface NodeRun {
   exitCode: number | null;
   trainSamples?: number;
   valSamples?: number;
+  /** True when the round trained only on labels a person reviewed. */
+  humanOnly?: boolean;
+  labelsReviewed?: number;
+  labelsMachine?: number;
   fits: FitLog[];
   globals: GlobalLog[];
   result: GateResult | null;
@@ -251,6 +314,12 @@ export interface PreflightNode {
   /** Real camera rows only. Null when the rows could not be read. */
   realLabelled: number | null;
   realAnomalies: number | null;
+  /** Labels a person looked at. Null when the rows could not be read. */
+  labelsReviewed: number | null;
+  labelsMachine: number | null;
+  reviewedAnomalies: number | null;
+  /** False when the node's code predates provenance, so all count as machine. */
+  provenanceReported: boolean | null;
   perLabel?: Partial<Record<LabelName, number>>;
   syntheticRows: number | null;
   roundRunning?: boolean;

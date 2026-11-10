@@ -5,28 +5,44 @@ import { BulkGrid } from "@/components/label/BulkGrid";
 import { LabelProgress } from "@/components/label/LabelProgress";
 import { SnapshotImage } from "@/components/label/SnapshotImage";
 import { NodeSignIn } from "@/components/NodeSignIn";
-import { ApiError, fetchSamples, writeLabel } from "@/lib/api";
+import {
+  ApiError,
+  fetchSamples,
+  fetchSuggestions,
+  generateSuggestions,
+  writeLabel,
+} from "@/lib/api";
 import { computeHints, shuffleKey } from "@/lib/fl/hints";
+import {
+  compareForReview,
+  detectorReview,
+  isBatchable,
+  isReviewed,
+  reviewFor,
+} from "@/lib/fl/review";
 import {
   LABEL_NAMES,
   ROUTINE_CLASSES,
   type LabelName,
   type NoteKind,
   type OperatorNote,
+  type ReviewPayload,
   type RoutineClass,
   type Sample,
+  type Suggestion,
 } from "@/lib/fl/types";
 import { formatEpoch } from "@/lib/format";
 
 type Item = Sample & { n: number };
 type Destination = "train" | "test";
-type Order = "random" | "likely" | "time";
+type Order = "review" | "random" | "likely" | "time";
 
 interface Pending {
   item: Item;
   label: LabelName;
   due: number;
   batch: number;
+  review: ReviewPayload;
 }
 
 type Undo =
@@ -87,6 +103,14 @@ export function LabelWorkspace({
   const [reloadTick, setReloadTick] = useState(0);
 
   const [order, setOrder] = useState<Order>("random");
+  const orderTouchedRef = useRef(false);
+  const [suggestions, setSuggestions] = useState<Map<number, Suggestion>>(() => new Map());
+  // Null until read. False: the node has no suggestions endpoint yet.
+  const [suggestionsReady, setSuggestionsReady] = useState<boolean | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<number | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [provenanceReported, setProvenanceReported] = useState(true);
+  const warnedNoEchoRef = useRef(false);
   const [view, setView] = useState<"single" | "bulk">("single");
   const [destination, setDestination] = useState<Destination>("train");
   const [showSkipped, setShowSkipped] = useState(false);
@@ -122,6 +146,7 @@ export function LabelWorkspace({
           notes: OperatorNote[];
           frozenAt: number | null;
         };
+        const suggested = await fetchSuggestions(nodeId);
         if (cancelled) return;
 
         const real = full.samples.filter(
@@ -131,6 +156,13 @@ export function LabelWorkspace({
         setSynthetic(full.samples.filter((row) => row.meta.synthetic).length);
         setNotes(new Map(noteBody.notes.map((note) => [note.n, note])));
         setFrozenAt(noteBody.frozenAt);
+        setSuggestions(new Map((suggested?.suggestions ?? []).map((s) => [s.n, s])));
+        setSuggestionsReady(suggested !== null);
+        setGeneratedAt(suggested?.generated_at ?? null);
+        setProvenanceReported(full.stats.provenance !== undefined);
+        if (suggested && suggested.count > 0 && !orderTouchedRef.current) {
+          setOrder("review");
+        }
         setPhase("ready");
         setLoadError(null);
       } catch (err) {
@@ -162,7 +194,13 @@ export function LabelWorkspace({
         return;
       }
       try {
-        const result = await writeLabel(nodeId, entry.item.n, entry.label, keepalive);
+        const result = await writeLabel(
+          nodeId,
+          entry.item.n,
+          entry.label,
+          keepalive,
+          entry.review,
+        );
         // The Pis run different branches. Reading back what the node says
         // it stored catches a mismatch on the first label, not the 200th.
         if (result.label && result.label !== entry.label) {
@@ -172,9 +210,22 @@ export function LabelWorkspace({
           );
           return;
         }
+        // A node on older code ignores the review and stores a plain label.
+        if (!result.provenance && !warnedNoEchoRef.current) {
+          warnedNoEchoRef.current = true;
+          setMessage(
+            `${nodeName} is not recording who labelled events, so these count as machine labels, not reviewed ones.`,
+          );
+        }
         setSamples((old) =>
           old.map((row) =>
-            row.n === entry.item.n ? { ...row, label: entry.label } : row,
+            row.n === entry.item.n
+              ? {
+                  ...row,
+                  label: entry.label,
+                  provenance: result.provenance ?? row.provenance,
+                }
+              : row,
           ),
         );
         void postNote({
@@ -228,13 +279,29 @@ export function LabelWorkspace({
 
   const queue = useMemo(() => {
     const open = samples.filter((row) => {
-      if (row.label !== null || pendingIds.has(row.n)) return false;
+      if (pendingIds.has(row.n)) return false;
       const note = notes.get(row.n);
+      if (order === "review") {
+        // A rule-derived label on the node is still unreviewed. A test-set
+        // or no-object event has no business here, whatever it is labelled.
+        if (isReviewed(row) || !suggestions.has(row.n)) return false;
+        if (!note) return true;
+        if (note.kind === "skip") return showSkipped;
+        return note.kind === "train";
+      }
+      if (row.label !== null) return false;
       if (!note) return true;
       if (note.kind === "skip") return showSkipped;
       return false;
     });
     const score = (row: Item) => hints.get(row.n)?.score ?? 0;
+    if (order === "review") {
+      return open.sort(
+        (a, b) =>
+          compareForReview(suggestions.get(a.n)!, suggestions.get(b.n)!) ||
+          shuffleKey(a.n) - shuffleKey(b.n),
+      );
+    }
     if (order === "time") return open.sort((a, b) => a.t - b.t);
     if (order === "likely") {
       return open
@@ -242,11 +309,21 @@ export function LabelWorkspace({
         .sort((a, b) => score(b) - score(a) || shuffleKey(a.n) - shuffleKey(b.n));
     }
     return open.sort((a, b) => shuffleKey(a.n) - shuffleKey(b.n));
-  }, [samples, notes, hints, order, pendingIds, showSkipped]);
+  }, [samples, notes, hints, order, pendingIds, showSkipped, suggestions]);
 
   const current: Item | null = relabel ?? queue[0] ?? null;
   const currentN = current?.n ?? null;
-  const defaultCls = current ? detectorClass(current) : null;
+  // Only the training review queue ever shows the machine's guess. Random
+  // stays blind, and the test set is never pre-filled.
+  const shown: Suggestion | null =
+    order === "review" && destination === "train" && !relabel && current
+      ? (suggestions.get(current.n) ?? null)
+      : null;
+  const suggestedRoutine =
+    shown && shown.label !== "anomaly"
+      ? (shown.label.replace("routine_", "") as RoutineClass)
+      : null;
+  const defaultCls = current ? (suggestedRoutine ?? detectorClass(current)) : null;
   const cls = choice && choice.n === currentN ? choice.cls : defaultCls;
   const seen = seenN !== null && seenN === currentN;
   const noPicture = noPictureN !== null && noPictureN === currentN;
@@ -257,9 +334,32 @@ export function LabelWorkspace({
       [...notes.values()].filter(
         (note) =>
           note.kind === "skip" &&
-          samples.some((row) => row.n === note.n && row.label === null),
+          samples.some(
+            (row) =>
+              row.n === note.n &&
+              (order === "review"
+                ? !isReviewed(row) && suggestions.has(row.n)
+                : row.label === null),
+          ),
       ).length,
-    [notes, samples],
+    [notes, samples, order, suggestions],
+  );
+  const reviewCount = useMemo(
+    () =>
+      samples.filter((row) => {
+        if (isReviewed(row) || !suggestions.has(row.n)) return false;
+        const note = notes.get(row.n);
+        return !note || note.kind === "train";
+      }).length,
+    [samples, suggestions, notes],
+  );
+  const suggestedAnomalies = useMemo(
+    () =>
+      samples.filter(
+        (row) =>
+          !isReviewed(row) && suggestions.get(row.n)?.label === "anomaly",
+      ).length,
+    [samples, suggestions],
   );
   const likelyCount = useMemo(
     () =>
@@ -277,9 +377,16 @@ export function LabelWorkspace({
       LabelName,
       number
     >;
-    for (const row of samples) if (row.label) out[row.label] += 1;
+    for (const row of samples) {
+      if (row.label && isReviewed(row)) out[row.label] += 1;
+    }
     return out;
   }, [samples]);
+
+  const machineLabelled = useMemo(
+    () => samples.filter((row) => row.label && !isReviewed(row)).length,
+    [samples],
+  );
 
   const testItems = useMemo(
     () => [...notes.values()].filter((note) => note.kind === "test"),
@@ -289,10 +396,15 @@ export function LabelWorkspace({
 
   const bulkItems = useMemo(
     () =>
-      queue.filter(
-        (row) => (hints.get(row.n)?.score ?? 0) === 0 && detectorClass(row) !== null,
-      ),
-    [queue, hints],
+      queue.filter((row) => {
+        if ((hints.get(row.n)?.score ?? 0) !== 0 || detectorClass(row) === null) {
+          return false;
+        }
+        if (order !== "review") return true;
+        const suggestion = suggestions.get(row.n);
+        return suggestion ? isBatchable(suggestion) : false;
+      }),
+    [queue, hints, order, suggestions],
   );
 
   // --- Actions --------------------------------------------------------
@@ -342,14 +454,15 @@ export function LabelWorkspace({
       }
       batchRef.current += 1;
       const batch = batchRef.current;
+      const review = reviewFor(label, shown, order);
       replacePending([
         ...pendingRef.current,
-        { item, label, due: Date.now() + HOLD_MS, batch },
+        { item, label, due: Date.now() + HOLD_MS, batch, review },
       ]);
       setUndoStack((old) => [...old, { kind: "train", batch, items: [item] }]);
       setRelabel(null);
     },
-    [destination, relabel, replacePending, writeNote],
+    [destination, order, relabel, replacePending, shown, writeNote],
   );
 
   const confirmBulk = useCallback(
@@ -360,9 +473,14 @@ export function LabelWorkspace({
       const due = Date.now() + HOLD_MS;
       const added = selected.flatMap((item) => {
         const detector = detectorClass(item);
-        return detector
-          ? [{ item, label: routineLabel(detector), due, batch }]
-          : [];
+        if (!detector) return [];
+        const suggestion = order === "review" ? suggestions.get(item.n) : undefined;
+        const label = suggestion ? suggestion.label : routineLabel(detector);
+        // The whole batch was on screen with its proposed class.
+        const review = suggestion
+          ? reviewFor(label, suggestion, "bulk:review")
+          : detectorReview(label, `bulk:${order}`);
+        return [{ item, label, due, batch, review }];
       });
       replacePending([...pendingRef.current, ...added]);
       setUndoStack((old) => [
@@ -370,7 +488,7 @@ export function LabelWorkspace({
         { kind: "train", batch, items: added.map((entry) => entry.item) },
       ]);
     },
-    [replacePending],
+    [order, replacePending, suggestions],
   );
 
   const skip = useCallback(
@@ -441,6 +559,31 @@ export function LabelWorkspace({
     [applyLabel, canLabel, cls, current],
   );
 
+  const acceptSuggestion = useCallback(() => {
+    if (!current || !canLabel || !shown) return;
+    if (Date.now() - shownAtRef.current < MIN_VIEW_MS) return;
+    applyLabel(current, shown.label);
+  }, [applyLabel, canLabel, current, shown]);
+
+  const generate = useCallback(async () => {
+    setMessage(null);
+    setGenerating(true);
+    try {
+      const exclude = [...notes.values()]
+        .filter((note) => note.kind === "test")
+        .map((note) => note.n);
+      const result = await generateSuggestions(nodeId, exclude);
+      setMessage(
+        `Suggested ${result.generated} events, ${result.suggested_anomalies} as anomalies. ${result.excluded} test-set events left out.`,
+      );
+      setReloadTick((tick) => tick + 1);
+    } catch {
+      setMessage(`Could not generate suggestions on ${nodeName}.`);
+    } finally {
+      setGenerating(false);
+    }
+  }, [nodeId, nodeName, notes]);
+
   useEffect(() => {
     if (view !== "single" || phase !== "ready") return;
     const onKey = (event: KeyboardEvent) => {
@@ -448,7 +591,10 @@ export function LabelWorkspace({
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
       if ((event.target as HTMLElement).closest("input,textarea,select")) return;
       const key = event.key.toLowerCase();
-      if (key === "r") onLabelKey("routine");
+      if (key === "enter") {
+        // Enter on a focused button already clicks it.
+        if (!(event.target as HTMLElement).closest("button")) acceptSuggestion();
+      } else if (key === "r") onLabelKey("routine");
       else if (key === "a") onLabelKey("anomaly");
       else if (key === "s" && current) skip(current);
       else if (key === "x" && current && canLabel && !relabel) notObject(current);
@@ -459,7 +605,19 @@ export function LabelWorkspace({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canLabel, current, currentN, notObject, onLabelKey, phase, relabel, skip, undo, view]);
+  }, [
+    acceptSuggestion,
+    canLabel,
+    current,
+    currentN,
+    notObject,
+    onLabelKey,
+    phase,
+    relabel,
+    skip,
+    undo,
+    view,
+  ]);
 
   const retryFailures = useCallback(() => {
     const failed = failures;
@@ -537,6 +695,8 @@ export function LabelWorkspace({
         pending={pending.length}
         totalEvents={samples.length}
         synthetic={synthetic}
+        machineLabelled={machineLabelled}
+        provenanceReported={provenanceReported}
       />
 
       {halted && (
@@ -569,9 +729,11 @@ export function LabelWorkspace({
         <BulkGrid items={bulkItems} nodeId={nodeId} onConfirm={confirmBulk} />
       ) : !current ? (
         <p className="rounded border border-border bg-surface p-10 text-center font-mono text-xs text-muted">
-          {order === "likely"
-            ? "No unlabelled events have a hint right now."
-            : "Queue is empty. Refresh to pick up new events."}
+          {order === "review"
+            ? "Nothing to review. Generate suggestions to fill this queue."
+            : order === "likely"
+              ? "No unlabelled events have a hint right now."
+              : "Queue is empty. Refresh to pick up new events."}
         </p>
       ) : (
         <section className="grid gap-4 rounded border border-border bg-surface p-4 lg:grid-cols-[1fr_300px]">
@@ -621,6 +783,45 @@ export function LabelWorkspace({
                 </>
               )}
             </dl>
+
+            {shown && (
+              <div
+                className={`rounded border p-2 text-[11px] ${
+                  shown.label === "anomaly"
+                    ? "border-danger/40 bg-danger/10"
+                    : "border-accent/40 bg-surface-raised"
+                }`}
+              >
+                <p className="text-muted">Machine suggestion, not a label yet</p>
+                <p
+                  className={`mt-0.5 text-sm font-semibold ${
+                    shown.label === "anomaly" ? "text-danger" : "text-foreground"
+                  }`}
+                >
+                  {shown.label}
+                </p>
+                <p className="mt-0.5 break-words text-muted">
+                  {shown.source}
+                  {shown.confidence !== null &&
+                    ` · ${Math.round(shown.confidence * 100)}%`}
+                  {shown.disagree &&
+                    ` · disagree (rule ${shown.rule_label}, model ${shown.model_label})`}
+                </p>
+                {current.label && (
+                  <p className="mt-0.5 text-muted">
+                    On the node now: {current.label}, not reviewed
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={!canLabel}
+                  onClick={acceptSuggestion}
+                  className="mt-2 w-full rounded border border-accent py-2 font-semibold tracking-[0.1em] text-foreground uppercase disabled:opacity-40"
+                >
+                  Accept (Enter)
+                </button>
+              </div>
+            )}
 
             {hint && hint.reasons.length > 0 && (
               <ul className="rounded border border-border bg-surface-raised p-2 text-[11px] text-foreground">
@@ -694,6 +895,18 @@ export function LabelWorkspace({
       <div className="flex flex-wrap items-center gap-3">
         <fieldset className="flex items-center gap-1 rounded border border-border bg-surface p-1">
           <legend className="sr-only">Queue order</legend>
+          {destination === "train" && suggestionsReady && (
+            <button
+              type="button"
+              onClick={() => {
+                orderTouchedRef.current = true;
+                setOrder("review");
+              }}
+              className={`rounded px-3 py-1.5 font-mono text-[11px] tracking-wider uppercase ${order === "review" ? TOGGLE_ON : TOGGLE_OFF}`}
+            >
+              Review queue ({reviewCount})
+            </button>
+          )}
           {(
             [
               ["random", "Random"],
@@ -704,7 +917,10 @@ export function LabelWorkspace({
             <button
               key={value}
               type="button"
-              onClick={() => setOrder(value)}
+              onClick={() => {
+                orderTouchedRef.current = true;
+                setOrder(value);
+              }}
               className={`rounded px-3 py-1.5 font-mono text-[11px] tracking-wider uppercase ${order === value ? TOGGLE_ON : TOGGLE_OFF}`}
             >
               {name}
@@ -753,6 +969,43 @@ export function LabelWorkspace({
         <span className="font-mono text-[11px] text-muted">{queue.length} in queue</span>
       </div>
 
+      {order === "review" && (
+        <p className="font-mono text-[11px] leading-relaxed text-muted">
+          Suggested anomalies and the least certain events come first. Enter
+          accepts. R or A corrects. {suggestedAnomalies} suggested anomal
+          {suggestedAnomalies === 1 ? "y is" : "ies are"} shown one at a time
+          and never batched. Random stays blind: it shows no suggestions, so
+          use it too, or only what the machine flagged ever gets looked at.
+        </p>
+      )}
+
+      {destination === "train" && suggestionsReady === false && (
+        <p className="font-mono text-[11px] text-muted">
+          {nodeName} has no suggestions endpoint yet, so the review queue is
+          off. Random and Likely still work.
+        </p>
+      )}
+
+      {destination === "train" && suggestionsReady && (
+        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted">
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={generating}
+            onClick={generate}
+          >
+            {generating ? "Generating…" : "Generate suggestions"}
+          </button>
+          <span>
+            {generatedAt
+              ? `Last generated ${formatEpoch(generatedAt)}, for events recorded by then.`
+              : "None generated yet."}{" "}
+            Suggestions are stored apart from labels and never reach training
+            unless a person accepts one.
+          </span>
+        </div>
+      )}
+
       {order === "likely" && (
         <p className="font-mono text-[11px] text-muted">
           Sorted by camera data only, never the model. A hint is a reason to
@@ -781,6 +1034,8 @@ export function LabelWorkspace({
                 onClick={() => {
                   setDestination("test");
                   setView("single");
+                  // The test set is hand-labelled with nothing pre-filled.
+                  if (order === "review") setOrder("random");
                 }}
                 className={`rounded px-3 py-1.5 font-mono text-[11px] tracking-wider uppercase disabled:opacity-40 ${destination === "test" ? TOGGLE_ON : TOGGLE_OFF}`}
               >

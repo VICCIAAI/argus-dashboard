@@ -36,6 +36,8 @@ export function PreflightPanel({ data }: { data: PreflightResponse }) {
               <th className={TH}>Reports as</th>
               <th className={TH}>Accelerator</th>
               <th className={TH}>Real labels</th>
+              <th className={TH}>Human-reviewed</th>
+              <th className={TH}>Machine, unreviewed</th>
               <th className={TH}>Anomalies</th>
               <th className={TH}>Synthetic rows</th>
               <th className={TH}>Head</th>
@@ -63,6 +65,22 @@ export function PreflightPanel({ data }: { data: PreflightResponse }) {
                     : `${node.realLabelled} / ${MIN_LABELS_PER_NODE}`}
                   {node.total !== undefined && (
                     <span className="text-muted"> of {node.total} events</span>
+                  )}
+                </td>
+                <td className={TD}>
+                  {node.labelsReviewed ?? "unknown"}
+                  {node.reviewedAnomalies !== null &&
+                    node.reviewedAnomalies !== undefined && (
+                      <span className="text-muted">
+                        {" "}
+                        ({node.reviewedAnomalies} anomalies)
+                      </span>
+                    )}
+                </td>
+                <td className={TD}>
+                  {node.labelsMachine ?? "unknown"}
+                  {node.provenanceReported === false && (
+                    <span className="text-muted"> (node not updated)</span>
                   )}
                 </td>
                 <td className={TD}>{node.realAnomalies ?? "unknown"}</td>

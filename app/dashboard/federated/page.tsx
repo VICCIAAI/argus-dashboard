@@ -228,7 +228,9 @@ export default function FederatedPage() {
         Rounds train the anomaly head, which judges whether a detection is
         routine for this site. They do not change YOLO or its bounding boxes.
         Real data only: synthetic rows are excluded, and the Nov 8 simulation is
-        not shown.
+        not shown. Only a round trained on human-reviewed labels counts as
+        evidence. Others are pipeline tests, because a label from a rule on an
+        input feature can only teach the head that rule.
       </p>
 
       {problem && (

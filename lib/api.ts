@@ -1,5 +1,12 @@
 import { WS_EVENTS_URL } from "./config";
-import type { LabelName, SamplesResponse } from "./fl/types";
+import type {
+  GenerateResult,
+  LabelName,
+  LabelProvenance,
+  ReviewPayload,
+  SamplesResponse,
+  SuggestionsResponse,
+} from "./fl/types";
 
 // Shapes match the FastAPI contract in CLAUDE.md — keep in sync with
 // Mohammed's backend once it exists for real.
@@ -94,6 +101,7 @@ export type LabelAction = "confirm" | "correct";
 export interface LabelPayload {
   action: LabelAction;
   label?: string;
+  review?: ReviewPayload;
 }
 
 export class ApiError extends Error {
@@ -161,6 +169,8 @@ export interface LabelResult {
   id: number;
   label?: string;
   labelled_total?: number;
+  /** Absent when the node runs code that does not record provenance. */
+  provenance?: LabelProvenance;
 }
 
 /**
@@ -184,13 +194,39 @@ export function writeLabel(
   id: number,
   label: LabelName,
   keepalive = false,
+  review?: ReviewPayload,
 ) {
-  const payload: LabelPayload = { action: "correct", label };
+  const payload: LabelPayload = { action: "correct", label, review };
   return apiFetch<LabelResult>(withNode(`/events/${id}/label`, nodeId), {
     method: "POST",
     body: JSON.stringify(payload),
     keepalive,
   });
+}
+
+/** A node's machine suggestions, or null if it has no such endpoint yet. */
+export async function fetchSuggestions(
+  nodeId: string,
+): Promise<SuggestionsResponse | null> {
+  try {
+    return await apiFetch<SuggestionsResponse>(
+      withNode("/federated/suggestions", nodeId),
+      { signal: AbortSignal.timeout(30_000) },
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask a node to recompute suggestions. Writes only its suggestions file.
+ * `exclude` is the test set, which must never be pre-filled.
+ */
+export function generateSuggestions(nodeId: string, exclude: number[]) {
+  return apiFetch<GenerateResult>(
+    withNode("/federated/suggestions/generate", nodeId),
+    { method: "POST", body: JSON.stringify({ exclude }) },
+  );
 }
 
 /**

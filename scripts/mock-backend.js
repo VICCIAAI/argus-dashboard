@@ -11,6 +11,8 @@
 // and one aggregator stand-in:
 //   MOCK_ROLE=flower MOCK_BACKEND_PORT=8190 node scripts/mock-backend.js
 // MOCK_ROUND=1 adds a finished round, MOCK_SYNTHETIC=n adds synthetic rows.
+// MOCK_LEGACY=n labels the first n rows as rule-derived, with no provenance.
+// MOCK_OLD_NODE=1 behaves like a node from before label provenance.
 // Everything these serve is invented for testing. Point a test console at
 // them with its own ARGUS_FL_DATA_DIR, so none of it reaches real history.
 const http = require("http");
@@ -20,6 +22,7 @@ const ALLOWED_ORIGIN = process.env.MOCK_BACKEND_ORIGIN || "http://localhost:3000
 const MOCK_FL = process.env.MOCK_FL === "1";
 const ROLE = process.env.MOCK_ROLE || "node";
 const NODE_NAME = process.env.MOCK_NODE_NAME || "Mock";
+const OLD_NODE = process.env.MOCK_OLD_NODE === "1";
 
 function base64url(obj) {
   return Buffer.from(JSON.stringify(obj))
@@ -101,6 +104,12 @@ for (let i = 1; i <= SAMPLE_COUNT; i += 1) {
     },
   });
 }
+// Rule-derived labels from before provenance: dwell says anomaly, the rest
+// copy the detector. No provenance field, like a real node's existing rows.
+for (let i = 0; i < Math.min(Number(process.env.MOCK_LEGACY || 0), samples.length); i += 1) {
+  const row = samples[i];
+  row.label = row.features.dwell >= 0.9 ? "anomaly" : `routine_${row.features.class}`;
+}
 for (let i = 0; i < Number(process.env.MOCK_SYNTHETIC || 0); i += 1) {
   const n = SAMPLE_COUNT + i + 1;
   samples.push({
@@ -110,11 +119,65 @@ for (let i = 0; i < Number(process.env.MOCK_SYNTHETIC || 0); i += 1) {
   });
 }
 
+function provenanceOf(row) {
+  if (!row.label) return null;
+  return row.prov ?? { origin: "machine", source: "legacy:rule-derived", reviewed: false };
+}
+
+function publicRow(row) {
+  if (OLD_NODE) return row;
+  const { prov, ...rest } = row;
+  void prov;
+  return { ...rest, provenance: provenanceOf(row) };
+}
+
+function provenanceCounts() {
+  const out = { reviewed: 0, reviewed_blind: 0, reviewed_corrected: 0, reviewed_accepted: 0, reviewed_anomalies: 0, machine_unreviewed: 0 };
+  const kinds = { blind: "reviewed_blind", correct: "reviewed_corrected", accept: "reviewed_accepted" };
+  for (const row of samples) {
+    const prov = provenanceOf(row);
+    if (!prov) continue;
+    if (!prov.reviewed) { out.machine_unreviewed += 1; continue; }
+    out.reviewed += 1;
+    if (kinds[prov.review]) out[kinds[prov.review]] += 1;
+    if (row.label === "anomaly") out.reviewed_anomalies += 1;
+  }
+  return out;
+}
+
 function sampleStats() {
   const per = Object.fromEntries(LABELS.map((name) => [name, 0]));
   for (const row of samples) if (row.label) per[row.label] += 1;
   const labelled = samples.filter((row) => row.label).length;
-  return { total: samples.length, labelled, unlabelled: samples.length - labelled, per_label: per, path: "/mock/samples.jsonl" };
+  const stats = { total: samples.length, labelled, unlabelled: samples.length - labelled, per_label: per, path: "/mock/samples.jsonl" };
+  return OLD_NODE ? stats : { ...stats, provenance: provenanceCounts() };
+}
+
+// Same shape as the node's suggest.py. Uncertain enough, for some rows, that
+// a test can see the review order and the batch cut-off do something.
+let suggestions = [];
+let suggestedAt = null;
+
+function makeSuggestions(exclude) {
+  const skip = new Set(exclude);
+  suggestedAt = Date.now() / 1000;
+  suggestions = samples
+    .filter((row) => !row.meta.synthetic && !skip.has(row.n) && !provenanceOf(row)?.reviewed)
+    .map((row) => {
+      const rule = row.features.class === "person" && row.features.dwell >= 0.9 ? "anomaly" : `routine_${row.features.class}`;
+      return {
+        n: row.n,
+        id: row.id,
+        label: rule,
+        source: "rule:dwell>=0.9",
+        confidence: null,
+        uncertainty: seeded(row.n + 50) < 0.15 ? 0.45 : null,
+        rule_label: rule,
+        model_label: null,
+        disagree: false,
+        at: suggestedAt,
+      };
+    });
 }
 
 // Fixed "head" so a test can predict what the event feed reports.
@@ -219,7 +282,25 @@ function handleFederated(req, res, path, query) {
   }
   if (req.method === "GET" && path === "/api/federated/samples") {
     const limit = Number(query.get("limit") || 50);
-    send(res, 200, { stats: sampleStats(), samples: samples.slice(-limit).reverse() });
+    send(res, 200, { stats: sampleStats(), samples: samples.slice(-limit).reverse().map(publicRow) });
+    return true;
+  }
+  if (!OLD_NODE && req.method === "GET" && path === "/api/federated/suggestions") {
+    const live = suggestions.filter((item) => {
+      const row = samples.find((candidate) => candidate.n === item.n);
+      return row && !provenanceOf(row)?.reviewed;
+    });
+    send(res, 200, { count: live.length, generated_at: suggestedAt, suggestions: live });
+    return true;
+  }
+  if (!OLD_NODE && req.method === "POST" && path === "/api/federated/suggestions/generate") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const exclude = JSON.parse(body || "{}").exclude || [];
+      makeSuggestions(exclude);
+      send(res, 200, { generated: suggestions.length, suggested_anomalies: suggestions.filter((s) => s.label === "anomaly").length, excluded: exclude.length, model: null, generated_at: suggestedAt });
+    });
     return true;
   }
   if (req.method === "GET" && path === "/api/federated/round") {
@@ -256,8 +337,22 @@ function handleFederated(req, res, path, query) {
       if (payload.action !== "correct" || !LABELS.includes(payload.label)) {
         return send(res, 422, { detail: "mock expects correct + exact label" });
       }
+      const review = OLD_NODE ? undefined : payload.review;
+      if (!review && provenanceOf(row)?.reviewed) {
+        return send(res, 409, { detail: "already reviewed by a person" });
+      }
+      if (review?.kind === "accept" && review.suggested_label !== payload.label) {
+        return send(res, 422, { detail: "an accepted suggestion must match the label" });
+      }
+      if (review?.kind === "correct" && review.suggested_label === payload.label) {
+        return send(res, 422, { detail: "a correction must differ from the suggestion" });
+      }
       row.label = payload.label;
-      send(res, 200, { ok: true, id: row.n, label: row.label, labelled_total: sampleStats().labelled });
+      row.prov = review
+        ? { origin: review.kind === "accept" ? "machine" : "human", source: review.kind === "accept" ? review.suggested_source : "operator", reviewed: true, review: review.kind, suggested_label: review.suggested_label, suggested_source: review.suggested_source, via: review.via, at: Date.now() / 1000 }
+        : { origin: "machine", source: "api:unattributed", reviewed: false, at: Date.now() / 1000 };
+      const reply = { ok: true, id: row.n, label: row.label, labelled_total: sampleStats().labelled };
+      send(res, 200, OLD_NODE ? reply : { ...reply, provenance: provenanceOf(row) });
     });
     return true;
   }

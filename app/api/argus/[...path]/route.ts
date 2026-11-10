@@ -34,12 +34,18 @@ const GET_ALLOWED = [
   /^camera\/snapshot$/,
   /^camera\/stream$/,
   /^federated\/samples$/,
+  /^federated\/suggestions$/,
 ];
 
-// Deliberately only labels. Starting a round, bootstrapping synthetic rows
-// and rolling back a model are operator decisions made outside the console,
-// so /federated/round and /federated/samples/bootstrap must never be added.
-const POST_ALLOWED = [/^events\/\d+\/label$/];
+// Deliberately only labels and machine suggestions, and generating
+// suggestions writes nothing but the node's suggestions file. Starting a
+// round, bootstrapping synthetic rows and rolling back a model are operator
+// decisions made outside the console, so /federated/round and
+// /federated/samples/bootstrap must never be added.
+const POST_ALLOWED = [
+  /^events\/\d+\/label$/,
+  /^federated\/suggestions\/generate$/,
+];
 
 // The MJPEG stream is an open-ended response; nothing here may be cached
 // or buffered into a static payload.

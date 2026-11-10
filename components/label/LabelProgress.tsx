@@ -17,11 +17,16 @@ export function LabelProgress({
   pending,
   totalEvents,
   synthetic,
+  machineLabelled,
+  provenanceReported,
 }: {
+  /** Labels a person reviewed. Machine labels do not count toward a round. */
   counts: Record<LabelName, number>;
   pending: number;
   totalEvents: number;
   synthetic: number;
+  machineLabelled: number;
+  provenanceReported: boolean;
 }) {
   const labelled = LABEL_NAMES.reduce((sum, name) => sum + counts[name], 0);
   const share = Math.min(1, labelled / MIN_LABELS_PER_NODE);
@@ -32,7 +37,7 @@ export function LabelProgress({
       <div className="flex items-center gap-3 pr-6 md:border-r md:border-border">
         <p className="text-4xl leading-none font-semibold text-foreground">{anomalies}</p>
         <p className="max-w-[130px] font-mono text-[11px] leading-snug tracking-wider text-muted uppercase">
-          Anomalies labelled
+          Anomalies reviewed
         </p>
       </div>
 
@@ -40,7 +45,7 @@ export function LabelProgress({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="font-mono text-xs text-foreground">
             <span className="text-lg font-semibold">{labelled}</span> of{" "}
-            {MIN_LABELS_PER_NODE} real labels for a round
+            {MIN_LABELS_PER_NODE} human-reviewed labels for a round
             {pending > 0 && <span className="text-muted"> · {pending} saving</span>}
           </p>
           <p className="font-mono text-[11px] text-muted">
@@ -53,7 +58,7 @@ export function LabelProgress({
           aria-valuemin={0}
           aria-valuemax={MIN_LABELS_PER_NODE}
           aria-valuenow={labelled}
-          aria-label="Real labels toward the minimum for a round"
+          aria-label="Human-reviewed labels toward the minimum for a round"
           className="mt-2 h-2 rounded-full bg-surface-raised"
         >
           <div
@@ -88,7 +93,10 @@ export function LabelProgress({
         </ul>
         <p className="mt-1 font-mono text-[11px] text-muted">
           Real camera events only, synthetic rows excluded. Unlabelled is never
-          treated as routine.
+          treated as routine. {machineLabelled} machine label
+          {machineLabelled === 1 ? "" : "s"} on this node not reviewed yet.
+          {!provenanceReported &&
+            " This node does not record provenance yet, so all of its labels count as machine."}
         </p>
       </div>
     </section>

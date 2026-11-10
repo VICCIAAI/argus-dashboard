@@ -77,6 +77,7 @@ interface NodeRoundStatus {
   run_dir: string | null;
   result: GateResult | null;
   log: string[];
+  human_only?: boolean;
 }
 
 interface NodeHead {
@@ -110,6 +111,9 @@ function parseLog(log: string[]) {
   const globals: GlobalLog[] = [];
   let trainSamples: number | undefined;
   let valSamples: number | undefined;
+  let humanOnly: boolean | undefined;
+  let labelsReviewed: number | undefined;
+  let labelsMachine: number | undefined;
   for (const line of log) {
     if (!line.startsWith("{")) continue;
     try {
@@ -117,13 +121,24 @@ function parseLog(log: string[]) {
       if (entry.kind === "ready") {
         trainSamples = entry.train;
         valSamples = entry.val;
+        humanOnly = entry.human_only;
+        labelsReviewed = entry.labels_reviewed;
+        labelsMachine = entry.labels_machine;
       } else if (entry.kind === "fit") fits.push(entry);
       else if (entry.kind === "global") globals.push(entry);
     } catch {
       // Flower's own log lines are mixed in; only ours are JSON.
     }
   }
-  return { fits, globals, trainSamples, valSamples };
+  return {
+    fits,
+    globals,
+    trainSamples,
+    valSamples,
+    humanOnly,
+    labelsReviewed,
+    labelsMachine,
+  };
 }
 
 function runContaining(history: HistoryFile, seconds: number, window: number) {
@@ -188,6 +203,9 @@ function mergeNode(
     exitCode: round.exit_code,
     trainSamples: parsed.trainSamples ?? existing?.trainSamples,
     valSamples: parsed.valSamples ?? existing?.valSamples,
+    humanOnly: parsed.humanOnly ?? round.human_only ?? existing?.humanOnly,
+    labelsReviewed: parsed.labelsReviewed ?? existing?.labelsReviewed,
+    labelsMachine: parsed.labelsMachine ?? existing?.labelsMachine,
     fits: parsed.fits.length ? parsed.fits : (existing?.fits ?? []),
     globals: parsed.globals.length ? parsed.globals : (existing?.globals ?? []),
     result,
