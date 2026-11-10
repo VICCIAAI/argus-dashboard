@@ -584,6 +584,26 @@ export function LabelWorkspace({
     }
   }, [nodeId, nodeName, notes]);
 
+  // Whether focus last moved by Tab. A button reached that way keeps Enter;
+  // one that only holds focus because it was clicked must not. (The browser
+  // marks any focused button :focus-visible once a key is pressed, so that
+  // selector cannot tell the two apart.)
+  const tabbingRef = useRef(false);
+  useEffect(() => {
+    const onPointer = () => {
+      tabbingRef.current = false;
+    };
+    const onTab = (event: KeyboardEvent) => {
+      if (event.key === "Tab") tabbingRef.current = true;
+    };
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("keydown", onTab, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("keydown", onTab, true);
+    };
+  }, []);
+
   useEffect(() => {
     if (view !== "single" || phase !== "ready") return;
     const onKey = (event: KeyboardEvent) => {
@@ -592,8 +612,11 @@ export function LabelWorkspace({
       if ((event.target as HTMLElement).closest("input,textarea,select")) return;
       const key = event.key.toLowerCase();
       if (key === "enter") {
-        // Enter on a focused button already clicks it.
-        if (!(event.target as HTMLElement).closest("button")) acceptSuggestion();
+        const button = (event.target as HTMLElement).closest("button");
+        if (button && tabbingRef.current) return;
+        event.preventDefault();
+        button?.blur();
+        acceptSuggestion();
       } else if (key === "r") onLabelKey("routine");
       else if (key === "a") onLabelKey("anomaly");
       else if (key === "s" && current) skip(current);
