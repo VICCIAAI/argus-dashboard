@@ -115,7 +115,10 @@ export function SwipeCardBody({
   const [zoom, setZoom] = useState(small);
   const [clip, setClip] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
-  const badge = LANE_BADGE[card.lane];
+  const badge =
+    card.lane === "uncertain" && card.basis === "heuristic"
+      ? { ...LANE_BADGE.uncertain, text: "Borderline" }
+      : LANE_BADGE[card.lane];
   const count = card.members.length;
 
   useEffect(() => {
