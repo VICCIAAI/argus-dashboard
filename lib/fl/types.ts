@@ -45,10 +45,12 @@ export interface LabelProvenance {
   origin: "human" | "machine";
   source: string;
   reviewed: boolean;
-  review?: "blind" | "correct" | "accept";
+  review?: "blind" | "correct" | "accept" | "staged";
   suggested_label?: LabelName;
   suggested_source?: string;
   via?: string;
+  reviewer?: string;
+  confidence?: number;
   at?: number;
 }
 
@@ -101,10 +103,15 @@ export interface GenerateResult {
 
 /** What the operator did on an event, sent with the label. */
 export interface ReviewPayload {
-  kind: "blind" | "correct" | "accept";
+  /** staged: acted out on purpose during staging mode; always anomaly. */
+  kind: "blind" | "correct" | "accept" | "staged";
   suggested_label?: LabelName;
   suggested_source?: string;
   via?: string;
+  /** Who swiped, as typed on the console. Old nodes ignore it. */
+  reviewer?: string;
+  /** Which screen: operator (label page) or swipe. Old nodes ignore it. */
+  source?: "operator" | "swipe";
 }
 
 export interface SampleStats {

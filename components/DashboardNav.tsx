@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/dashboard/live", label: "Live feed" },
   { href: "/dashboard/alerts", label: "Alerts" },
   { href: "/dashboard/label", label: "Label" },
+  { href: "/dashboard/swipe", label: "Swipe" },
   { href: "/dashboard/federated", label: "Federated" },
   { href: "/dashboard/thermal", label: "Thermal" },
 ] as const;

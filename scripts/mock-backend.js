@@ -72,16 +72,28 @@ function seeded(i) {
 
 const samples = [];
 const SAMPLE_COUNT = Number(process.env.MOCK_SAMPLES || 260);
+// MOCK_T0 (epoch s) puts the first event at a fixed time and spaces the rest
+// 90 s apart, split across MOCK_SPLIT_DAYS days, so date filters can be
+// tested. MOCK_BURSTS groups every 4 events into a near-duplicate burst
+// (same class, 4 s apart, nearly the same box).
+const T0 = process.env.MOCK_T0 ? Number(process.env.MOCK_T0) : null;
+const BURSTS = process.env.MOCK_BURSTS === "1";
 for (let i = 1; i <= SAMPLE_COUNT; i += 1) {
   const r = seeded(i);
-  const cls = CLASSES[Math.floor(seeded(i + 1000) * CLASSES.length)];
+  const lead = BURSTS ? i - ((i - 1) % 4) : i;
+  const cls = CLASSES[Math.floor(seeded(lead + 1000) * CLASSES.length)];
   const dwell = i % 13 === 0 ? 0.95 : Number((r * 0.6).toFixed(4));
-  const left = Number((0.2 + seeded(i + 7) * 0.5).toFixed(4));
-  const top = Number((0.2 + seeded(i + 8) * 0.4).toFixed(4));
+  const left = Number((0.2 + seeded(lead + 7) * 0.5 + (i - lead) * 0.01).toFixed(4));
+  const top = Number((0.2 + seeded(lead + 8) * 0.4).toFixed(4));
+  let t = Date.now() / 1000 - (SAMPLE_COUNT - i) * 90;
+  if (T0 !== null) {
+    const half = i > SAMPLE_COUNT / 2 ? 2 * 86400 : 0;
+    t = T0 + half + (BURSTS ? (lead - 1) * 90 + (i - lead) * 4 : (i - 1) * 90);
+  }
   samples.push({
     id: `mock-${i}`,
     n: i,
-    t: Date.now() / 1000 - (SAMPLE_COUNT - i) * 90,
+    t,
     label: null,
     features: {
       class: cls,
@@ -117,6 +129,32 @@ for (let i = 0; i < Number(process.env.MOCK_SYNTHETIC || 0); i += 1) {
     features: { class: "person", width: 0.1, height: 0.2, centre_x: 0.5, centre_y: 0.5, speed: 0, dwell: 0.1, confidence: 0.9 },
     meta: { synthetic: true, site: "driveway" },
   });
+}
+
+// A fixed fake head: confident about most events, unsure about some.
+function mockProba(row) {
+  const u = seeded(row.n + 555);
+  const clsIdx = Math.max(0, LABELS.indexOf(`routine_${row.features.class}`));
+  let pa;
+  if (row.features.dwell >= 0.9) pa = 0.55 + u * 0.4;
+  else if (u < 0.25) pa = 0.3 + u * 1.2; // 0.3..0.6: the unsure ones
+  else pa = u * 0.03; // very sure it is routine
+  const p = [0, 0, 0, 0, pa];
+  p[clsIdx] = 1 - pa;
+  return p;
+}
+
+// MOCK_LIVE_EVERY_S: the camera "records" a new person event this often,
+// so staging mode can be tested against events arriving in real time.
+if (process.env.MOCK_LIVE_EVERY_S) {
+  setInterval(() => {
+    const n = Math.max(...samples.map((row) => row.n)) + 1;
+    samples.push({
+      id: `live-${n}`, n, t: Date.now() / 1000, label: null,
+      features: { class: "person", width: 0.2, height: 0.3, centre_x: 0.5, centre_y: 0.5, speed: 0.2, dwell: 0.3, confidence: 0.8 },
+      meta: { snapshot: `live-${n}.jpg`, box: [0.4, 0.35, 0.6, 0.65], track_id: n, source: "camera", synthetic: false },
+    });
+  }, Number(process.env.MOCK_LIVE_EVERY_S) * 1000);
 }
 
 function provenanceOf(row) {
@@ -326,6 +364,40 @@ function handleFederated(req, res, path, query) {
     res.end(snapshotSvg(row.n, row.features.class));
     return true;
   }
+  if (!OLD_NODE && req.method === "GET" && path === "/api/federated/scores") {
+    const since = query.get("since") ? Number(query.get("since")) : null;
+    const until = query.get("until") ? Number(query.get("until")) : null;
+    const rows = samples.filter((row) => !row.meta.synthetic && (since === null || row.t >= since) && (until === null || row.t < until));
+    send(res, 200, { model: "fl-r1", count: rows.length, scores: rows.map((row) => {
+      const p = mockProba(row);
+      const best = p.indexOf(Math.max(...p));
+      const ent = -p.reduce((acc, q) => acc + (q > 0 ? q * Math.log(q) : 0), 0) / Math.log(5);
+      const sorted = [...p].sort((a, b) => b - a);
+      return { n: row.n, t: row.t, label: row.label, reviewed: Boolean(provenanceOf(row)?.reviewed), source: provenanceOf(row)?.source ?? null,
+        x: [row.features.centre_x, row.features.centre_y, row.features.width, row.features.height],
+        model_label: LABELS[best], confidence: Number(p[best].toFixed(4)), p_anomaly: Number(p[4].toFixed(4)), entropy: Number(ent.toFixed(4)), margin: Number((sorted[0] - sorted[1]).toFixed(4)) };
+    }) });
+    return true;
+  }
+  if (!OLD_NODE && req.method === "POST" && path === "/api/federated/autolabel") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const b = JSON.parse(body || "{}");
+      const threshold = b.threshold ?? 0.95;
+      const exclude = new Set(b.exclude || []);
+      const rows = samples.filter((row) => !row.meta.synthetic && !row.label && !exclude.has(row.n) && (b.since == null || row.t >= b.since) && (b.until == null || row.t < b.until));
+      const picked = rows.filter((row) => Math.max(...mockProba(row)) >= threshold);
+      const source = `auto:model:fl-r1@${threshold}`;
+      if (!b.dry_run) for (const row of picked) {
+        const p = mockProba(row);
+        row.label = LABELS[p.indexOf(Math.max(...p))];
+        row.prov = { origin: "machine", source, reviewed: false, confidence: Math.max(...p), at: Date.now() / 1000 };
+      }
+      send(res, 200, { labelled: picked.length, considered: rows.length, threshold, source, dry_run: Boolean(b.dry_run), model: "fl-r1", events: picked.map((row) => ({ n: row.n })) });
+    });
+    return true;
+  }
   const label = path.match(/^\/api\/events\/(\d+)\/label$/);
   if (req.method === "POST" && label) {
     let body = "";
@@ -348,8 +420,14 @@ function handleFederated(req, res, path, query) {
         return send(res, 422, { detail: "a correction must differ from the suggestion" });
       }
       row.label = payload.label;
+      if (review?.kind === "staged" && payload.label !== "anomaly") {
+        return send(res, 422, { detail: "a staged event is labelled anomaly" });
+      }
+      if (!review && row.prov?.reviewed) {
+        return send(res, 409, { detail: "already reviewed by a person" });
+      }
       row.prov = review
-        ? { origin: review.kind === "accept" ? "machine" : "human", source: review.kind === "accept" ? review.suggested_source : "operator", reviewed: true, review: review.kind, suggested_label: review.suggested_label, suggested_source: review.suggested_source, via: review.via, at: Date.now() / 1000 }
+        ? { origin: review.kind === "accept" ? "machine" : "human", source: review.kind === "accept" ? review.suggested_source : review.kind === "staged" ? "staged" : (review.source || "operator"), reviewed: true, review: review.kind, suggested_label: review.suggested_label, suggested_source: review.suggested_source, via: review.via, reviewer: review.reviewer, at: Date.now() / 1000 }
         : { origin: "machine", source: "api:unattributed", reviewed: false, at: Date.now() / 1000 };
       const reply = { ok: true, id: row.n, label: row.label, labelled_total: sampleStats().labelled };
       send(res, 200, OLD_NODE ? reply : { ...reply, provenance: provenanceOf(row) });

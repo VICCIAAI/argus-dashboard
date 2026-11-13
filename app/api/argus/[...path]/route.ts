@@ -35,6 +35,8 @@ const GET_ALLOWED = [
   /^camera\/stream$/,
   /^federated\/samples$/,
   /^federated\/suggestions$/,
+  /^federated\/scores$/,
+  /^events\/\d+$/,
 ];
 
 // Deliberately only labels and machine suggestions, and generating
@@ -45,6 +47,9 @@ const GET_ALLOWED = [
 const POST_ALLOWED = [
   /^events\/\d+\/label$/,
   /^federated\/suggestions\/generate$/,
+  // Machine labels for events the model is very sure of. Marked machine on
+  // the node, never counted as reviewed, never over a person's label.
+  /^federated\/autolabel$/,
 ];
 
 // The MJPEG stream is an open-ended response; nothing here may be cached

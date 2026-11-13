@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useNodes } from "@/hooks/useNodes";
 import { DashboardNav } from "@/components/DashboardNav";
 import { NodePanel } from "@/components/NodePanel";
+import { StagingPanel } from "@/components/swipe/StagingPanel";
 
 // Every configured node on one screen. The single-node pages (live,
 // alerts, thermal) still follow the node picker; this one ignores it.
@@ -54,11 +55,14 @@ export default function DashboardPage() {
           </p>
         </div>
       ) : (
+        <>
+        <StagingPanel nodes={nodes} />
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] items-start gap-4">
           {nodes.map((node) => (
             <NodePanel key={node.id} node={node} onAlertCount={reportAlerts} />
           ))}
         </div>
+        </>
       )}
     </div>
   );

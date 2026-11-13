@@ -11,6 +11,7 @@ const PROTECTED_PREFIXES = ["/dashboard"];
 // These pages cover several nodes and ask for each node's sign-in themselves.
 const MULTI_NODE_PAGES = new Set([
   "/dashboard",
+  "/dashboard/swipe",
   "/dashboard/label",
   "/dashboard/federated",
 ]);
